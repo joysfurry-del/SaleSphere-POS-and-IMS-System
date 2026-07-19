@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Profile - Salesphere</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+<div class="container header-inner">
+<a href="index.html" class="logo">Salesphere</a>
+    <nav>
+<a href="index.html">Home</a>
+<a href="cart.html">Cart <span class="cart-count" id="cart-count">0</span></a>
+<a href="order-history.html">Orders</a>
+</nav>
+<div id="auth-container"></div>
+</div>
+</header>
+
+<main class="container">
+<div class="profile-page">
+<h1>My Profile</h1>
+
+<div id="profile-spinner" class="page-spinner"><div class="spinner"></div></div>
+
+<div id="profile-content" style="display:none">
+<div class="profile-card" id="profile-card">
+<div id="profile-view"></div>
+<div id="profile-edit" style="display:none"></div>
+</div>
+<div class="profile-actions" id="profile-actions"></div>
+</div>
+
+<div id="profile-error" style="display:none;" class="lookup-error">
+<h3>Error loading profile</h3>
+<p id="profile-error-msg"></p>
+<button class="btn btn-primary" id="profile-retry">Retry</button>
+</div>
+</div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+    requireAuth();
+
+    var profileData = null;
+    var isEditing = false;
+
+    // fetch customer profile from server
+    function loadProfile() {
+        document.getElementById('profile-spinner').style.display = 'flex';
+        document.getElementById('profile-content').style.display = 'none';
+        document.getElementById('profile-error').style.display = 'none';
+
+        apiAuthGet('customer/profile.php')
+            .then(function (data) {
+                profileData = data.data;
+                document.getElementById('profile-spinner').style.display = 'none';
+                document.getElementById('profile-content').style.display = 'block';
+                renderView();
+            })
+            .catch(function (err) {
+                document.getElementById('profile-spinner').style.display = 'none';
+                var msg = err.message || 'Unexpected error';
+                if (err.status) msg += ' (HTTP ' + err.status + ')';
+                document.getElementById('profile-error-msg').textContent = msg;
+                document.getElementById('profile-error').style.display = 'block';
+                console.error('Profile load error:', err);
+            });
+    }
+
+    // show profile details
+    function renderView() {
+        if (!profileData) return;
+        var fields = [
+            { label: 'Name', key: 'name' },
+            { label: 'Email', key: 'email' },
+            { label: 'Phone', key: 'phone', fallback: '-' },
+            { label: 'Address', key: 'address', fallback: '-' },
+            { label: 'City', key: 'city', fallback: '-' },
+            { label: 'Postal Code', key: 'postal_code', fallback: '-' },
+            { label: 'Country', key: 'country', fallback: '-' },
+            { label: 'Customer Type', key: 'customer_type', fallback: 'Regular' },
+            { label: 'Member Since', key: 'created_at', fallback: '-' }
+        ];
+        var html = '';
+        for (var i = 0; i < fields.length; i++) {
+            var val = profileData[fields[i].key] || fields[i].fallback || '';
+            html += '<div class="profile-field">' +
+                '<div class="profile-field-label">' + fields[i].label + '</div>' +
+                '<div class="profile-field-value">' + escapeHtml(val) + '</div>' +
+                '</div>';
+        }
+        document.getElementById('profile-view').innerHTML = html;
+
+        var actions = document.getElementById('profile-actions');
+        actions.innerHTML = '<button class="btn btn-primary" id="edit-btn">Edit Profile</button>';
+
+        document.getElementById('edit-btn').addEventListener('click', function () {
+            renderEdit();
+        });
+    }
+
+    // show edit profile form
+    function renderEdit() {
+        if (!profileData) return;
+        var fields = [
+            { label: 'Name', key: 'name', type: 'text' },
+            { label: 'Phone', key: 'phone', type: 'tel' },
+            { label: 'Address', key: 'address', type: 'text' },
+            { label: 'City', key: 'city', type: 'text' },
+            { label: 'Postal Code', key: 'postal_code', type: 'text' },
+            { label: 'Country', key: 'country', type: 'text' }
+        ];
+        var html = '';
+        for (var i = 0; i < fields.length; i++) {
+            var val = profileData[fields[i].key] || '';
+            html += '<div class="profile-field editing">' +
+                '<div class="profile-field-label">' + fields[i].label + '</div>' +
+                '<div class="profile-field-input">' +
+                '<input type="' + fields[i].type + '" id="edit-' + fields[i].key + '" value="' + escapeAttr(val) + '" placeholder="' + fields[i].label + '">' +
+                '</div></div>';
+        }
+        document.getElementById('profile-view').style.display = 'none';
+        document.getElementById('profile-edit').innerHTML = html;
+        document.getElementById('profile-edit').style.display = 'block';
+
+        var actions = document.getElementById('profile-actions');
+        actions.innerHTML = '<button class="btn btn-primary" id="save-btn">Save Changes</button>' +
+            '<button class="btn btn-outline" id="cancel-btn">Cancel</button>';
+
+        document.getElementById('save-btn').addEventListener('click', function () {
+            saveProfile();
+        });
+        document.getElementById('cancel-btn').addEventListener('click', function () {
+            cancelEdit();
+        });
+    }
+
+    // save profile changes to server
+    function saveProfile() {
+        var body = {};
+        var fields = ['name', 'phone', 'address', 'city', 'postal_code', 'country'];
+        for (var i = 0; i < fields.length; i++) {
+            var val = document.getElementById('edit-' + fields[i]).value.trim();
+            if (val) body[fields[i]] = val;
+        }
+        if (!body.name) { showToast('Name is required', 'warning'); return; }
+
+        var btn = document.getElementById('save-btn');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+
+        apiAuthPut('customer/profile.php', body)
+            .then(function (data) {
+                profileData = data.data || profileData;
+                localStorage.setItem('customer_name', body.name);
+                initAuthUI();
+                showToast('Profile updated!');
+                cancelEdit();
+            })
+            .catch(function (err) {
+                showToast(err.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Save Changes';
+            });
+    }
+
+    // go back to profile view
+    function cancelEdit() {
+        document.getElementById('profile-edit').style.display = 'none';
+        document.getElementById('profile-edit').innerHTML = '';
+        document.getElementById('profile-view').style.display = 'block';
+        renderView();
+    }
+
+    document.getElementById('profile-retry').addEventListener('click', loadProfile);
+
+    function escapeAttr(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    initAuthUI();
+    getCartToken();
+    updateCartBadge();
+    loadProfile();
+})();
+</script>
+</body>
+</html>
