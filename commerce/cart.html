@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shopping Cart - Salesphere</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+<div class="container header-inner">
+<a href="index.html" class="logo">Salesphere</a>
+    <nav>
+<a href="index.html">Home</a>
+<a href="cart.html" class="active">Cart <span class="cart-count" id="cart-count">0</span></a>
+<a href="order-history.html">Orders</a>
+</nav>
+<div id="auth-container"></div>
+<div class="search-bar">
+<input type="text" id="search-input" placeholder="Search products...">
+</div>
+</div>
+</header>
+
+<main class="container">
+<div class="cart-page-header">
+<h1>Shopping Cart <span id="cart-item-count">(0 items)</span></h1>
+<a href="index.html" class="btn btn-outline btn-sm">&larr; Continue Shopping</a>
+</div>
+
+<div id="cart-content" class="cart-page">
+<div class="page-spinner" id="cart-spinner" style="grid-column:1/-1"><div class="spinner"></div></div>
+</div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+    var cartData = null;
+
+    // get cart items from server
+    function loadCart() {
+        var content = document.getElementById('cart-content');
+        content.innerHTML = '<div class="page-spinner" style="grid-column:1/-1"><div class="spinner"></div></div>';
+
+        apiGet('cart.php', { cart_token: getCartToken() }).then(function (data) {
+            cartData = data.data;
+            var items = cartData && cartData.items ? cartData.items : [];
+            if (items.length === 0) {
+                content.innerHTML = '<div class="cart-empty" style="grid-column:1/-1"><div class="empty-icon">&#128722;</div><h2>Your cart is empty</h2><p>Looks like you haven\'t added anything yet.</p><a href="index.html" class="btn btn-primary">Start Shopping</a></div>';
+                document.getElementById('cart-item-count').textContent = '(0 items)';
+                updateCartBadge();
+                return;
+            }
+            content.innerHTML = '';
+            var itemsSection = document.createElement('div');
+            itemsSection.className = 'cart-items';
+            content.appendChild(itemsSection);
+
+            var summarySection = document.createElement('div');
+            summarySection.className = 'cart-summary';
+            content.appendChild(summarySection);
+
+            renderCartItems(itemsSection, items);
+            renderSummary(summarySection, cartData);
+            document.getElementById('cart-item-count').textContent = '(' + items.length + ' items)';
+            updateCartBadge();
+        }).catch(function (err) {
+            document.getElementById('cart-content').innerHTML = '<div class="error-state" style="grid-column:1/-1"><h3>Error loading cart</h3><p>' + escapeHtml(err.message) + '</p><button class="btn btn-primary" onclick="loadCart()">Retry</button></div>';
+        });
+    }
+
+    // show cart items in table
+    function renderCartItems(container, items) {
+        var html = '';
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var thumbHtml = '';
+            if (item.ProductImage) {
+                thumbHtml = '<div class="cart-item-thumb" style="background-image:url(\'' + escapeAttr(item.ProductImage) + '\')"></div>';
+            } else {
+                var initial = item.ProductName ? item.ProductName.charAt(0).toUpperCase() : '?';
+                thumbHtml = '<div class="cart-item-thumb placeholder"><span>' + escapeHtml(initial) + '</span></div>';
+            }
+            html += '<div class="cart-item" data-item-id="' + item.CartItemID + '">' +
+                thumbHtml +
+                '<div class="cart-item-name"><a href="product.html?id=' + item.ProductID + '">' + escapeHtml(item.ProductName) + '</a></div>' +
+                '<div class="cart-item-price">' + formatPrice(item.Price) + '</div>' +
+                '<div class="quantity-selector">' +
+                '<button class="qty-btn-minus" type="button">&minus;</button>' +
+                '<input type="number" value="' + item.Quantity + '" min="1" max="999" readonly>' +
+                '<button class="qty-btn-plus" type="button">+</button>' +
+                '</div>' +
+                '<div class="cart-item-total">' + formatPrice(item.LineTotal) + '</div>' +
+                '<button class="cart-item-remove" title="Remove item">&times;</button>' +
+                '</div>';
+        }
+        container.innerHTML = html;
+
+        container.querySelectorAll('.cart-item').forEach(function (el) {
+            var itemId = parseInt(el.getAttribute('data-item-id'));
+            var qtyInput = el.querySelector('input');
+            var minusBtn = el.querySelector('.qty-btn-minus');
+            var plusBtn = el.querySelector('.qty-btn-plus');
+            var removeBtn = el.querySelector('.cart-item-remove');
+
+            function updateItemQty(newQty) {
+                if (newQty < 1) {
+                    removeItem(itemId);
+                    return;
+                }
+                minusBtn.disabled = true;
+                plusBtn.disabled = true;
+                apiPost('cart.php', { action: 'update', cart_token: getCartToken(), item_id: itemId, quantity: newQty })
+                    .then(function () { loadCart(); })
+                    .catch(function (err) {
+                        showToast(err.message, 'error');
+                        loadCart();
+                    });
+            }
+
+            minusBtn.addEventListener('click', function () {
+                var val = parseInt(qtyInput.value) || 1;
+                if (val > 1) updateItemQty(val - 1);
+            });
+            plusBtn.addEventListener('click', function () {
+                var val = parseInt(qtyInput.value) || 1;
+                updateItemQty(val + 1);
+            });
+
+            removeBtn.addEventListener('click', function () { removeItem(itemId); });
+        });
+    }
+
+    // remove item from cart
+    function removeItem(itemId) {
+        apiPost('cart.php', { action: 'remove', cart_token: getCartToken(), item_id: itemId })
+            .then(function () {
+                showToast('Item removed');
+                loadCart();
+                updateCartBadge();
+            })
+            .catch(function (err) {
+                showToast(err.message, 'error');
+            });
+    }
+
+    // show order totals and promo box
+    function renderSummary(container, cartData) {
+        var cart = cartData.cart || {};
+        var items = cartData.items || [];
+        var subtotal = 0;
+        for (var i = 0; i < items.length; i++) {
+            subtotal += parseFloat(items[i].LineTotal) || 0;
+        }
+        var discount = parseFloat(cartData.discount) || 0;
+        var taxable = subtotal - discount;
+        var tax = taxable * TAX_RATE;
+        var grandTotal = taxable + tax;
+
+        var html = '<h2>Order Summary</h2>';
+        html += '<div class="summary-row"><span class="label">Subtotal</span><span class="value">' + formatPrice(subtotal) + '</span></div>';
+        if (discount > 0) {
+            html += '<div class="summary-row discount"><span class="label">Discount</span><span class="value">-' + formatPrice(discount) + '</span></div>';
+        }
+        html += '<div class="summary-row"><span class="label">Tax (6%)</span><span class="value">' + formatPrice(tax) + '</span></div>';
+        html += '<div class="summary-row total"><span class="label">Total</span><span class="value">' + formatPrice(grandTotal) + '</span></div>';
+        html += '<button class="btn btn-primary btn-block btn-checkout" id="checkout-btn">Proceed to Checkout</button>';
+
+        var promoCode = (cart.promo_code) || (cartData.promo_code) || '';
+        html += '<div class="promo-section"><h3>Promo Code</h3>';
+        if (promoCode) {
+            html += '<div class="promo-applied"><span>Code: <strong>' + escapeHtml(promoCode) + '</strong> (-' + formatPrice(discount) + ')</span><button class="remove-promo" id="remove-promo-btn">Remove</button></div>';
+        } else {
+            html += '<div class="promo-input"><input type="text" id="promo-input" placeholder="Enter promo code"><button class="btn btn-outline btn-sm" id="apply-promo-btn">Apply</button></div>';
+        }
+        html += '</div>';
+
+        container.innerHTML = html;
+
+        document.getElementById('checkout-btn').addEventListener('click', function () {
+            window.location.href = 'checkout.html';
+        });
+
+        var applyBtn = document.getElementById('apply-promo-btn');
+        if (applyBtn) {
+            applyBtn.addEventListener('click', function () {
+                var code = document.getElementById('promo-input').value.trim();
+                if (!code) { showToast('Please enter a promo code', 'warning'); return; }
+                applyBtn.disabled = true;
+                applyBtn.textContent = 'Applying...';
+                apiPost('cart.php', { action: 'promo', cart_token: getCartToken(), code: code })
+                    .then(function (data) {
+                        showToast(data.message || 'Promo applied!');
+                        loadCart();
+                    })
+                    .catch(function (err) {
+                        showToast(err.message, 'error');
+                        applyBtn.disabled = false;
+                        applyBtn.textContent = 'Apply';
+                    });
+            });
+        }
+
+        var removePromoBtn = document.getElementById('remove-promo-btn');
+        if (removePromoBtn) {
+            removePromoBtn.addEventListener('click', function () {
+                removePromoBtn.disabled = true;
+                apiPost('cart.php', { action: 'remove_promo', cart_token: getCartToken() })
+                    .then(function () {
+                        showToast('Promo removed');
+                        loadCart();
+                    })
+                    .catch(function (err) {
+                        showToast(err.message, 'error');
+                        removePromoBtn.disabled = false;
+                    });
+            });
+        }
+    }
+
+    document.getElementById('search-input').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            var val = this.value.trim();
+            if (val) window.location.href = 'index.html?search=' + encodeURIComponent(val);
+        }
+    });
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function escapeAttr(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    initAuthUI();
+    getCartToken();
+    loadCart();
+})();
+</script>
+</body>
+</html>

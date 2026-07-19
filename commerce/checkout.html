@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checkout - Salesphere</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+<div class="container header-inner">
+<a href="index.html" class="logo">Salesphere</a>
+    <nav>
+<a href="index.html">Home</a>
+<a href="cart.html">Cart <span class="cart-count" id="cart-count">0</span></a>
+<a href="order-history.html">Orders</a>
+</nav>
+<div id="auth-container"></div>
+</div>
+</header>
+
+<main class="container">
+<div class="checkout-page">
+<div class="checkout-form">
+<h1>Checkout</h1>
+<form id="checkout-form" novalidate>
+<div class="form-group" id="field-name">
+<label>Full Name <span class="required">*</span></label>
+<input type="text" id="input-name" placeholder="John Doe" required>
+<div class="error-text">Please enter your name</div>
+</div>
+<div class="form-group" id="field-email">
+<label>Email Address <span class="required">*</span></label>
+<input type="email" id="input-email" placeholder="john@example.com" required>
+<div class="error-text">Please enter a valid email address</div>
+</div>
+<div class="form-group" id="field-phone">
+<label>Phone Number</label>
+<input type="tel" id="input-phone" placeholder="0123456789">
+</div>
+<div class="form-group" id="field-address">
+<label>Billing Address <span class="required">*</span></label>
+<input type="text" id="input-address" placeholder="123 Main Street" required>
+<div class="error-text">Please enter your address</div>
+</div>
+<div class="form-group" id="field-city">
+<label>City <span class="required">*</span></label>
+<input type="text" id="input-city" placeholder="Kuala Lumpur" required>
+<div class="error-text">Please enter your city</div>
+</div>
+<div class="form-group" id="field-postcode">
+<label>Postcode <span class="required">*</span></label>
+<input type="text" id="input-postcode" placeholder="50000" required>
+<div class="error-text">Please enter your postcode</div>
+</div>
+<div class="form-checkbox">
+<input type="checkbox" id="same-shipping" checked>
+<label for="same-shipping">Shipping address same as billing</label>
+</div>
+<div class="form-group" id="field-shipping" style="display:none">
+<label>Shipping Address</label>
+<textarea id="input-shipping" placeholder="123 Main Street, Kuala Lumpur, 50000"></textarea>
+</div>
+<div class="form-group">
+<label>Order Notes (Optional)</label>
+<textarea id="input-notes" placeholder="Any special instructions..."></textarea>
+</div>
+<div id="checkout-error" style="display:none;margin-bottom:16px;padding:12px 16px;background:rgba(239,68,68,0.12);border:1px solid var(--danger);border-radius:var(--radius-sm);color:var(--danger);font-size:14px;"></div>
+<button type="submit" class="btn btn-primary btn-lg btn-block" id="place-order-btn">Place Order</button>
+</form>
+</div>
+
+<div class="checkout-summary" id="checkout-summary">
+<h2>Order Summary</h2>
+<div class="page-spinner" id="summary-spinner"><div class="spinner"></div></div>
+<div id="summary-content" style="display:none">
+<div class="checkout-summary-items" id="summary-items"></div>
+<div class="summary-row"><span class="label">Subtotal</span><span class="value" id="summary-subtotal"></span></div>
+<div class="summary-row discount" id="summary-discount-row" style="display:none"><span class="label">Discount</span><span class="value" id="summary-discount"></span></div>
+<div class="summary-row"><span class="label">Tax</span><span class="value" id="summary-tax"></span></div>
+<div class="summary-row total"><span class="label">Total</span><span class="value" id="summary-total"></span></div>
+</div>
+</div>
+</div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+    var cartData = null;
+    var orderResponse = null;
+
+    // load cart summary for checkout
+    function loadSummary() {
+        document.getElementById('summary-spinner').style.display = 'flex';
+        document.getElementById('summary-content').style.display = 'none';
+
+        apiGet('cart.php', { cart_token: getCartToken() }).then(function (data) {
+            cartData = data.data;
+            var items = cartData && cartData.items ? cartData.items : [];
+            if (items.length === 0) {
+                window.location.href = 'cart.html';
+                return;
+            }
+            document.getElementById('summary-spinner').style.display = 'none';
+            document.getElementById('summary-content').style.display = 'block';
+
+            var subtotal = 0;
+            var itemsHtml = '';
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                subtotal += parseFloat(item.LineTotal) || 0;
+                itemsHtml += '<div class="checkout-summary-item"><span class="item-name">' + escapeHtml(item.ProductName) + '</span><span class="item-qty">x' + item.Quantity + '</span><span class="item-total">' + formatPrice(item.LineTotal) + '</span></div>';
+            }
+            document.getElementById('summary-items').innerHTML = itemsHtml;
+
+            var discount = parseFloat(cartData.discount) || 0;
+            var taxable = subtotal - discount;
+            var tax = taxable * TAX_RATE;
+            var grandTotal = taxable + tax;
+
+            document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
+            if (discount > 0) {
+                document.getElementById('summary-discount-row').style.display = 'flex';
+                document.getElementById('summary-discount').textContent = '-' + formatPrice(discount);
+            } else {
+                document.getElementById('summary-discount-row').style.display = 'none';
+            }
+            document.getElementById('summary-tax').textContent = formatPrice(tax);
+            document.getElementById('summary-total').textContent = formatPrice(grandTotal);
+        }).catch(function (err) {
+            document.getElementById('summary-spinner').style.display = 'none';
+            document.getElementById('summary-content').innerHTML = '<div class="error-state"><p>' + escapeHtml(err.message) + '</p></div>';
+        });
+    }
+
+    var form = document.getElementById('checkout-form');
+    var placeBtn = document.getElementById('place-order-btn');
+
+    var fieldIds = ['name', 'email', 'address', 'city', 'postcode'];
+    fieldIds.forEach(function (id) {
+        var input = document.getElementById('input-' + id);
+        input.addEventListener('blur', function () { validateField(id); });
+    });
+
+    document.getElementById('input-email').addEventListener('blur', function () { validateField('email'); });
+
+    // check if field has value
+    function validateField(id) {
+        var input = document.getElementById('input-' + id);
+        var group = document.getElementById('field-' + id);
+        var val = input.value.trim();
+        var valid = true;
+        if (id === 'email') {
+            var re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            valid = val.length > 0 && re.test(val);
+        } else {
+            valid = val.length > 0;
+        }
+        if (valid) {
+            group.classList.remove('has-error');
+        } else {
+            group.classList.add('has-error');
+        }
+        return valid;
+    }
+
+    document.getElementById('same-shipping').addEventListener('change', function () {
+        document.getElementById('field-shipping').style.display = this.checked ? 'none' : 'block';
+    });
+
+    // place order when form submitted
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var valid = true;
+        fieldIds.forEach(function (id) {
+            if (!validateField(id)) valid = false;
+        });
+        if (!valid) {
+            var firstError = form.querySelector('.has-error input');
+            if (firstError) firstError.focus();
+            return;
+        }
+
+        var name = document.getElementById('input-name').value.trim();
+        var email = document.getElementById('input-email').value.trim();
+        var phone = document.getElementById('input-phone').value.trim();
+        var address = document.getElementById('input-address').value.trim();
+        var city = document.getElementById('input-city').value.trim();
+        var postcode = document.getElementById('input-postcode').value.trim();
+        var sameShipping = document.getElementById('same-shipping').checked;
+        var shippingAddress = sameShipping ? address : document.getElementById('input-shipping').value.trim();
+        var notes = document.getElementById('input-notes').value.trim();
+
+        placeBtn.disabled = true;
+        placeBtn.innerHTML = '<div class="spinner"></div> Processing...';
+        document.getElementById('checkout-error').style.display = 'none';
+
+        apiPost('checkout.php', {
+            cart_token: getCartToken(),
+            name: name,
+            email: email,
+            phone: phone,
+            address: address,
+            city: city,
+            postcode: postcode,
+            shipping_address: shippingAddress,
+            notes: notes
+        }).then(function (data) {
+            orderResponse = data.data;
+            var orderNumber = orderResponse.order_number || '';
+            sessionStorage.setItem('last_order', JSON.stringify(orderResponse));
+            window.location.href = 'confirmation.html?order=' + encodeURIComponent(orderNumber);
+        }).catch(function (err) {
+            placeBtn.disabled = false;
+            placeBtn.textContent = 'Place Order';
+            var errorEl = document.getElementById('checkout-error');
+            errorEl.textContent = err.message;
+            errorEl.style.display = 'block';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+    });
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    initAuthUI();
+    getCartToken();
+    loadSummary();
+    updateCartBadge();
+})();
+</script>
+</body>
+</html>

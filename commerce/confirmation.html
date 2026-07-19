@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Confirmed - Salesphere</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+<div class="container header-inner">
+<a href="index.html" class="logo">Salesphere</a>
+    <nav>
+<a href="index.html">Home</a>
+<a href="cart.html">Cart <span class="cart-count" id="cart-count">0</span></a>
+<a href="order-history.html">Orders</a>
+</nav>
+<div id="auth-container"></div>
+</div>
+</header>
+
+<main class="container">
+<div class="confirmation-page" id="confirmation-page">
+<div class="confirmation-icon">
+<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" stroke="#fff" stroke-width="3" fill="none"/></svg>
+</div>
+<h1>Order Placed Successfully!</h1>
+<p style="color:var(--text-muted);margin-bottom:24px">Thank you for your purchase. Your order has been confirmed.</p>
+
+<div class="card" style="padding:32px;margin-bottom:32px;text-align:center">
+<p style="font-size:14px;color:var(--text-muted);margin-bottom:4px">Order Number</p>
+<p class="order-number" id="order-number">---</p>
+<p style="font-size:14px;color:var(--text-muted);margin-top:16px;margin-bottom:4px">Total Amount</p>
+<p class="order-total" id="order-total">---</p>
+</div>
+
+<div class="confirmation-actions">
+<a href="order-lookup.html" class="btn btn-primary">Track Your Order</a>
+<a href="index.html" class="btn btn-outline">Continue Shopping</a>
+</div>
+</div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+    var params = new URLSearchParams(window.location.search);
+    // get order number from URL
+    var orderNumber = params.get('order');
+
+    if (!orderNumber) {
+        document.getElementById('confirmation-page').innerHTML = '<h1>Order not found</h1><p style="color:var(--text-muted);margin:16px 0">No order information available.</p><a href="index.html" class="btn btn-primary">Back to Home</a>';
+    } else {
+        document.getElementById('order-number').textContent = orderNumber;
+
+        var stored = sessionStorage.getItem('last_order');
+        if (stored) {
+            try {
+                var orderData = JSON.parse(stored);
+                if (orderData.total) {
+                    document.getElementById('order-total').textContent = formatPrice(orderData.total);
+                }
+            } catch (_) {}
+        }
+
+        sessionStorage.removeItem('last_order');
+    }
+
+    initAuthUI();
+    getCartToken();
+    updateCartBadge();
+})();
+</script>
+</body>
+</html>
