@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Salesphere - Home</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+<div class="container header-inner">
+<a href="index.html" class="logo">Salesphere</a>
+    <nav>
+<a href="index.html" class="active">Home</a>
+<a href="cart.html">Cart <span class="cart-count" id="cart-count">0</span></a>
+</nav>
+<div class="search-bar">
+<input type="text" id="search-input" placeholder="Search products...">
+</div>
+<div id="auth-container"></div>
+</div>
+</header>
+
+<main class="container">
+<div class="promo-hero" id="promoHero" style="display:none;margin-bottom:1.5rem;"></div>
+
+<div class="categories" id="categories"></div>
+
+<div class="product-grid" id="product-grid">
+<div class="page-spinner"><div class="spinner"></div></div>
+</div>
+
+<div class="pagination" id="pagination"></div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+    var currentPage = 1;
+    var currentCategory = null;
+    var currentSearch = '';
+    var totalPages = 1;
+
+    // load category filter buttons
+    function loadCategories() {
+        apiGet('categories.php').then(function (data) {
+            var container = document.getElementById('categories');
+            var html = '<button class="pill active" data-id="">All</button>';
+            for (var i = 0; i < data.data.length; i++) {
+                var cat = data.data[i];
+                html += '<button class="pill" data-id="' + cat.CategoryID + '">' + escapeHtml(cat.CategoryName) + '</button>';
+            }
+            container.innerHTML = html;
+            container.addEventListener('click', function (e) {
+                var pill = e.target.closest('.pill');
+                if (!pill) return;
+                var pills = container.querySelectorAll('.pill');
+                for (var j = 0; j < pills.length; j++) pills[j].classList.remove('active');
+                pill.classList.add('active');
+                currentCategory = pill.getAttribute('data-id') || null;
+                currentPage = 1;
+                loadProducts();
+            });
+        }).catch(function (err) {
+            showToast('Failed to load categories', 'error');
+        });
+    }
+
+    // load products and render grid
+    function loadProducts() {
+        var grid = document.getElementById('product-grid');
+        grid.innerHTML = '<div class="page-spinner"><div class="spinner"></div></div>';
+
+        var params = { page: currentPage, limit: 12 };
+        if (currentCategory) params.category_id = currentCategory;
+        if (currentSearch) params.search = currentSearch;
+
+        apiGet('products.php', params).then(function (data) {
+            var products = data.data || [];
+            totalPages = data.pages || 1;
+
+            if (products.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><span class="empty-icon">&#128269;</span><h3>No products found</h3><p>Try adjusting your search or filters</p></div>';
+                document.getElementById('pagination').innerHTML = '';
+                return;
+            }
+
+            var html = '';
+            for (var i = 0; i < products.length; i++) {
+                var p = products[i];
+                var imgHtml = '';
+                if (p.ProductImage) {
+                    imgHtml = '<div class="product-image" style="background-image:url(\'' + escapeAttr(p.ProductImage) + '\')"></div>';
+                } else {
+                    var initial = p.ProductName ? p.ProductName.charAt(0).toUpperCase() : '?';
+                    imgHtml = '<div class="product-image placeholder"><span>' + escapeHtml(initial) + '</span></div>';
+                }
+                html += '<div class="product-card">' +
+                    '<a href="product.html?id=' + p.ProductID + '">' + imgHtml + '</a>' +
+                    '<div class="product-info">' +
+                    '<span class="badge">' + escapeHtml(p.CategoryName || '') + '</span>' +
+                    '<h3><a href="product.html?id=' + p.ProductID + '">' + escapeHtml(p.ProductName) + '</a></h3>' +
+                    '<div class="rating-stars">★★★★☆ <span class="rating-text">4.5 (120 reviews)</span></div>' +
+                    '<p class="price">' + formatPrice(p.Price) + '</p>' +
+                    '<button class="btn btn-primary btn-sm add-to-cart" data-id="' + p.ProductID + '">Add to Cart</button>' +
+                    '</div></div>';
+            }
+            grid.innerHTML = html;
+            renderPagination();
+
+            grid.querySelectorAll('.add-to-cart').forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var self = this;
+                    self.disabled = true;
+                    self.textContent = 'Adding...';
+                    apiPost('cart.php', { action: 'add', cart_token: getCartToken(), product_id: parseInt(self.getAttribute('data-id')), quantity: 1 })
+                        .then(function () {
+                            showToast('Added to cart!');
+                            updateCartBadge();
+                        })
+                        .catch(function (err) {
+                            showToast(err.message, 'error');
+                        })
+                        .finally(function () {
+                            self.disabled = false;
+                            self.textContent = 'Add to Cart';
+                        });
+                });
+            });
+        }).catch(function (err) {
+            grid.innerHTML = '<div class="error-state"><h3>Error loading products</h3><p>' + escapeHtml(err.message) + '</p><button class="btn btn-primary" onclick="location.reload()">Retry</button></div>';
+        });
+    }
+
+    // show page number buttons
+    function renderPagination() {
+        var container = document.getElementById('pagination');
+        if (totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+        var html = '';
+        if (currentPage > 1) {
+            html += '<button class="btn btn-outline btn-sm" data-page="' + (currentPage - 1) + '">Previous</button>';
+        }
+        var dotsShown = false;
+        for (var i = 1; i <= totalPages; i++) {
+            if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 2) {
+                html += '<button class="btn btn-outline btn-sm' + (i === currentPage ? ' active' : '') + '" data-page="' + i + '">' + i + '</button>';
+                dotsShown = false;
+            } else if (!dotsShown) {
+                html += '<span class="page-dots">...</span>';
+                dotsShown = true;
+            }
+        }
+        if (currentPage < totalPages) {
+            html += '<button class="btn btn-outline btn-sm" data-page="' + (currentPage + 1) + '">Next</button>';
+        }
+        container.innerHTML = html;
+        container.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-page]');
+            if (btn) {
+                currentPage = parseInt(btn.getAttribute('data-page'));
+                loadProducts();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        });
+    }
+
+    var searchTimeout = null;
+    // search on input with debounce
+    document.getElementById('search-input').addEventListener('input', function (e) {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(function () {
+            currentSearch = e.target.value.trim();
+            currentPage = 1;
+            loadProducts();
+        }, 300);
+    });
+
+    // load promo banners on homepage
+    function loadPromotions() {
+        apiGet('promotions.php').then(function (data) {
+            var promos = data.data || [];
+            var container = document.getElementById('promoHero');
+            if (promos.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+            var html = '<div class="promo-hero-header"><h2>🔥 Ongoing Promotions</h2><p>Apply these codes at checkout to save big!</p></div><div class="promo-hero-scroll">';
+            for (var i = 0; i < promos.length; i++) {
+                var p = promos[i];
+                var discountText = p.Type === 'Percentage' ? p.Value + '% OFF' : 'Rs ' + parseFloat(p.Value).toFixed(2) + ' OFF';
+                html += '<div class="promo-hero-card" data-code="' + p.Code + '">'
+                    + '<div class="promo-hero-badge">' + discountText + '</div>'
+                    + '<div class="promo-hero-name">' + escapeHtml(p.Name) + '</div>'
+                    + (p.Description ? '<div class="promo-hero-desc">' + escapeHtml(p.Description) + '</div>' : '')
+                    + '<div class="promo-hero-code" onclick="copyPromoCode(\'' + p.Code + '\', event)">'
+                    + '<span class="promo-hero-code-label">Use code</span>'
+                    + '<span class="promo-hero-code-value">' + p.Code + '</span>'
+                    + '<span class="promo-hero-code-copy">Copy</span>'
+                    + '</div>'
+                    + '</div>';
+            }
+            html += '</div>';
+            container.innerHTML = html;
+            container.style.display = 'block';
+        }).catch(function () {});
+    }
+
+    // copy promo code to clipboard
+    function copyPromoCode(code, event) {
+        event.stopPropagation();
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(code).then(function () {
+                showToast('Code "' + code + '" copied! Paste it at checkout.');
+            }).catch(function () {});
+        } else {
+            showToast('Use code: ' + code + ' at checkout');
+        }
+    }
+    window.copyPromoCode = copyPromoCode;
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function escapeAttr(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    initAuthUI();
+    getCartToken();
+    loadCategories();
+    loadProducts();
+    loadPromotions();
+    updateCartBadge();
+})();
+</script>
+</body>
+</html>
