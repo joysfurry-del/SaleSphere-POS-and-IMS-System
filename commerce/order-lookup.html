@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Lookup - Salesphere</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+<div class="container header-inner">
+<a href="index.html" class="logo">Salesphere</a>
+<nav>
+<a href="index.html">Home</a>
+<a href="cart.html">Cart <span class="cart-count" id="cart-count">0</span></a>
+</nav>
+<div id="auth-container"></div>
+</div>
+</header>
+
+<main class="container">
+<div class="order-lookup-page">
+<h1>Track Your Order</h1>
+
+<div class="lookup-form">
+<form id="lookup-form" novalidate>
+<div class="form-group" id="field-email">
+<label>Email Address <span class="required">*</span></label>
+<input type="email" id="lookup-email" placeholder="john@example.com" required>
+<div class="error-text">Please enter a valid email</div>
+</div>
+<div class="form-group" id="field-order">
+<label>Order Number <span class="required">*</span></label>
+<input type="text" id="lookup-order" placeholder="OO-20260717-00001" required>
+<div class="error-text">Please enter your order number</div>
+</div>
+<button type="submit" class="btn btn-primary btn-lg" id="lookup-btn">Look Up Order</button>
+</form>
+</div>
+
+<div class="order-result" id="order-result">
+<h2>Order Details</h2>
+<div id="order-status"></div>
+<div class="order-detail-grid" id="order-details"></div>
+<h3 style="font-size:16px;margin-bottom:12px;margin-top:24px">Items</h3>
+<div style="overflow-x:auto">
+<table class="order-items-table" id="order-items-table">
+<thead>
+<tr>
+<th>Product</th>
+<th>Price</th>
+<th>Quantity</th>
+<th>Total</th>
+</tr>
+</thead>
+<tbody id="order-items-body"></tbody>
+</table>
+</div>
+</div>
+
+<div class="lookup-error" id="lookup-error">
+<h3>Order Not Found</h3>
+<p>We couldn't find an order with that email and order number. Please check your details and try again.</p>
+<button class="btn btn-primary" id="retry-btn">Try Again</button>
+</div>
+
+<div class="page-spinner" id="lookup-spinner" style="display:none"><div class="spinner"></div></div>
+</div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+    var form = document.getElementById('lookup-form');
+    var lookupBtn = document.getElementById('lookup-btn');
+    var resultEl = document.getElementById('order-result');
+    var errorEl = document.getElementById('lookup-error');
+    var spinnerEl = document.getElementById('lookup-spinner');
+
+    // submit order lookup form
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        var email = document.getElementById('lookup-email').value.trim();
+        var order = document.getElementById('lookup-order').value.trim();
+
+        var valid = true;
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            document.getElementById('field-email').classList.add('has-error');
+            valid = false;
+        } else {
+            document.getElementById('field-email').classList.remove('has-error');
+        }
+        if (!order) {
+            document.getElementById('field-order').classList.add('has-error');
+            valid = false;
+        } else {
+            document.getElementById('field-order').classList.remove('has-error');
+        }
+        if (!valid) return;
+
+        resultEl.style.display = 'none';
+        errorEl.style.display = 'none';
+        lookupBtn.disabled = true;
+        lookupBtn.textContent = 'Searching...';
+        spinnerEl.style.display = 'flex';
+
+        apiPost('orders.php', { email: email, order_number: order })
+            .then(function (data) {
+                spinnerEl.style.display = 'none';
+                lookupBtn.disabled = false;
+                lookupBtn.textContent = 'Look Up Order';
+                renderOrder(data.data);
+            })
+            .catch(function (err) {
+                spinnerEl.style.display = 'none';
+                lookupBtn.disabled = false;
+                lookupBtn.textContent = 'Look Up Order';
+                errorEl.style.display = 'block';
+            });
+    });
+
+    // show order details and items
+    function renderOrder(data) {
+        var order = data.order || {};
+        var items = data.items || [];
+        var customer = data.customer || {};
+
+        var status = (order.status || 'processing').toLowerCase();
+        var statusEl = document.getElementById('order-status');
+        statusEl.innerHTML = '<span class="order-status status-' + status + '">' + escapeHtml(order.status || 'Processing') + '</span>';
+
+        var detailsHtml = '';
+        var detailFields = [
+            { label: 'Order Number', value: order.order_number },
+            { label: 'Order Date', value: order.created_at || order.order_date || '' },
+            { label: 'Customer Name', value: customer.name },
+            { label: 'Email', value: customer.email },
+            { label: 'Phone', value: customer.phone },
+            { label: 'Shipping Address', value: order.shipping_address || order.address }
+        ];
+        for (var i = 0; i < detailFields.length; i++) {
+            if (detailFields[i].value) {
+                detailsHtml += '<div class="order-detail-item"><div class="detail-label">' + escapeHtml(detailFields[i].label) + '</div><div class="detail-value">' + escapeHtml(detailFields[i].value) + '</div></div>';
+            }
+        }
+        document.getElementById('order-details').innerHTML = detailsHtml;
+
+        var itemsHtml = '';
+        for (var j = 0; j < items.length; j++) {
+            var item = items[j];
+            itemsHtml += '<tr>' +
+                '<td>' + escapeHtml(item.ProductName || item.product_name || 'Product') + '</td>' +
+                '<td>' + formatPrice(item.Price || item.price || 0) + '</td>' +
+                '<td>' + (item.Quantity || item.quantity || 1) + '</td>' +
+                '<td>' + formatPrice(item.LineTotal || item.line_total || (item.Price * item.Quantity) || 0) + '</td>' +
+                '</tr>';
+        }
+        document.getElementById('order-items-body').innerHTML = itemsHtml;
+
+        resultEl.style.display = 'block';
+        resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    document.getElementById('retry-btn').addEventListener('click', function () {
+        errorEl.style.display = 'none';
+        document.getElementById('lookup-email').focus();
+    });
+
+    document.getElementById('lookup-email').addEventListener('blur', function () {
+        var val = this.value.trim();
+        if (val && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+            document.getElementById('field-email').classList.remove('has-error');
+        }
+    });
+    document.getElementById('lookup-order').addEventListener('blur', function () {
+        if (this.value.trim()) {
+            document.getElementById('field-order').classList.remove('has-error');
+        }
+    });
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    initAuthUI();
+    getCartToken();
+    updateCartBadge();
+})();
+</script>
+</body>
+</html>

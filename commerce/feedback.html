@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Submit Feedback - Salesphere</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+<div class="container header-inner">
+<a href="index.html" class="logo">Salesphere</a>
+    <nav>
+<a href="index.html">Home</a>
+<a href="cart.html">Cart <span class="cart-count" id="cart-count">0</span></a>
+<a href="order-history.html">Orders</a>
+</nav>
+<div id="auth-container"></div>
+</div>
+</header>
+
+<main class="container">
+<div class="feedback-page">
+<h1>Submit Feedback</h1>
+
+<div class="feedback-form">
+<form id="feedback-form" novalidate>
+    <div class="form-group" id="fb-product-group">
+<label>Product ID <span class="required">*</span></label>
+<input type="number" id="fb-product-id" placeholder="Enter the product ID" min="1" required>
+<select id="fb-product-select" style="display:none;width:100%;padding:10px 14px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:14px;" onchange="document.getElementById('fb-product-id').value=this.value"></select>
+<p id="fb-order-info" style="display:none;margin-top:8px;font-size:13px;color:var(--text-muted);"></p>
+</div>
+
+<div class="form-group">
+<label>Rating <span class="required">*</span></label>
+<div class="star-rating" id="star-rating">
+<input type="radio" name="rating" id="star5" value="5"><label for="star5">&#9733;</label>
+<input type="radio" name="rating" id="star4" value="4"><label for="star4">&#9733;</label>
+<input type="radio" name="rating" id="star3" value="3"><label for="star3">&#9733;</label>
+<input type="radio" name="rating" id="star2" value="2"><label for="star2">&#9733;</label>
+<input type="radio" name="rating" id="star1" value="1"><label for="star1">&#9733;</label>
+</div>
+<div class="error-text" id="rating-error" style="display:block;margin-top:4px">Please select a rating</div>
+</div>
+
+<div class="form-group">
+<label>Title <span class="required">*</span></label>
+<input type="text" id="fb-title" placeholder="Summary of your review" required>
+</div>
+
+<div class="form-group">
+<label>Comment <span class="required">*</span></label>
+<textarea id="fb-comment" placeholder="Tell us about your experience with this product..." required></textarea>
+</div>
+
+<div class="form-group">
+<label>Pros</label>
+<textarea id="fb-pros" placeholder="What did you like? (optional)"></textarea>
+</div>
+
+<div class="form-group">
+<label>Cons</label>
+<textarea id="fb-cons" placeholder="What could be improved? (optional)"></textarea>
+</div>
+
+<div id="fb-error" style="display:none;padding:10px 14px;background:rgba(239,68,68,0.12);border:1px solid var(--danger);border-radius:var(--radius-sm);margin-bottom:16px;color:var(--danger);font-size:14px;"></div>
+<button type="submit" class="btn btn-primary btn-lg btn-block" id="fb-submit-btn">Submit Feedback</button>
+</form>
+
+<div id="fb-success" style="display:none;text-align:center;padding:40px 20px">
+<div class="success-icon" style="width:64px;height:64px;border-radius:50%;background:var(--success);display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+<svg viewBox="0 0 24 24" style="width:32px;height:32px;stroke:#fff;fill:none;stroke-width:3"><polyline points="20 6 9 17 4 12"/></svg>
+</div>
+<h2 style="font-size:22px;margin-bottom:8px">Feedback Submitted!</h2>
+<p style="color:var(--text-muted);margin-bottom:8px">Thank you for your review. It will be visible after approval.</p>
+<p style="color:var(--text-muted);font-size:13px" id="fb-success-id"></p>
+<div style="margin-top:24px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+<a href="index.html" class="btn btn-primary">Continue Shopping</a>
+<a href="profile.html" class="btn btn-outline">My Profile</a>
+</div>
+</div>
+</div>
+</div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+    requireAuth();
+
+    var form = document.getElementById('feedback-form');
+    var submitBtn = document.getElementById('fb-submit-btn');
+    var successEl = document.getElementById('fb-success');
+    var errorEl = document.getElementById('fb-error');
+
+    // Load order products if order param is specified
+    (function loadOrderProducts() {
+        var params = new URLSearchParams(window.location.search);
+        var orderNum = params.get('order');
+        var email = params.get('email');
+        if (!orderNum) return;
+
+        var selectEl = document.getElementById('fb-product-select');
+        var productIdInput = document.getElementById('fb-product-id');
+        var orderInfoEl = document.getElementById('fb-order-info');
+
+        // If we have email, fetch order items
+        var apiEmail = email || '';
+        apiGet('orders.php?order_number=' + encodeURIComponent(orderNum) + (apiEmail ? '&email=' + encodeURIComponent(apiEmail) : ''))
+            .then(function (data) {
+                var orders = data.orders || data.data || [];
+                if (!Array.isArray(orders)) orders = [orders];
+                var found = null;
+                for (var i = 0; i < orders.length; i++) {
+                    if (orders[i].order_number === orderNum || orders[i].OrderID == orderNum || orders[i].id == orderNum) {
+                        found = orders[i];
+                        break;
+                    }
+                }
+                if (!found || !found.items || found.items.length === 0) return;
+
+                selectEl.innerHTML = '<option value="">-- Select a product --</option>';
+                for (var j = 0; j < found.items.length; j++) {
+                    var it = found.items[j];
+                    var pid = it.ProductID || it.product_id || it.id;
+                    var pname = it.ProductName || it.product_name || 'Product';
+                    selectEl.innerHTML += '<option value="' + pid + '">' + pname + ' (ID: ' + pid + ')</option>';
+                }
+                selectEl.style.display = 'block';
+                productIdInput.style.display = 'none';
+                orderInfoEl.textContent = 'Order #' + orderNum + ' — select a product from this order to review.';
+                orderInfoEl.style.display = 'block';
+            })
+            .catch(function () {
+                // Silently fall back to manual input
+            });
+    })();
+
+    // submit feedback form
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        var productId = parseInt(document.getElementById('fb-product-id').value.trim());
+        var rating = document.querySelector('input[name="rating"]:checked');
+        var title = document.getElementById('fb-title').value.trim();
+        var comment = document.getElementById('fb-comment').value.trim();
+        var pros = document.getElementById('fb-pros').value.trim();
+        var cons = document.getElementById('fb-cons').value.trim();
+
+        var valid = true;
+        if (!productId || productId < 1) { showToast('Please enter a valid product ID', 'warning'); valid = false; }
+        if (!rating) { document.getElementById('rating-error').style.display = 'block'; valid = false; }
+        else { document.getElementById('rating-error').style.display = 'none'; }
+        if (!title) { showToast('Please enter a title', 'warning'); valid = false; }
+        if (!comment) { showToast('Please enter a comment', 'warning'); valid = false; }
+        if (!valid) return;
+
+        var body = {
+            product_id: productId,
+            rating: parseInt(rating.value),
+            title: title,
+            comment: comment
+        };
+        if (pros) body.pros = pros;
+        if (cons) body.cons = cons;
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting...';
+        errorEl.style.display = 'none';
+
+        apiAuthPost('customer/feedback.php', body)
+            .then(function (data) {
+                form.style.display = 'none';
+                successEl.style.display = 'block';
+                if (data.data && data.data.feedback_id) {
+                    document.getElementById('fb-success-id').textContent = 'Feedback ID: ' + data.data.feedback_id;
+                }
+                showToast('Feedback submitted!');
+            })
+            .catch(function (err) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Feedback';
+                errorEl.textContent = err.message;
+                errorEl.style.display = 'block';
+            });
+    });
+
+    initAuthUI();
+    getCartToken();
+    updateCartBadge();
+})();
+</script>
+</body>
+</html>

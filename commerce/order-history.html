@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order History - Salesphere</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+<div class="container header-inner">
+<a href="index.html" class="logo">Salesphere</a>
+<nav>
+<a href="index.html">Home</a>
+<a href="cart.html">Cart <span class="cart-count" id="cart-count">0</span></a>
+<a href="order-history.html" class="active">Orders</a>
+</nav>
+<div id="auth-container"></div>
+</div>
+</header>
+
+<main class="container">
+<div class="order-lookup-page">
+<h1>Order History</h1>
+
+<div id="history-spinner" class="page-spinner"><div class="spinner"></div></div>
+
+<div id="history-empty" class="lookup-error" style="display:none">
+<h3>No Orders Found</h3>
+<p>You haven't placed any orders yet.</p>
+<a href="index.html" class="btn btn-primary" style="margin-top:12px">Start Shopping</a>
+</div>
+
+<div id="history-error" class="lookup-error" style="display:none">
+<h3>Something went wrong</h3>
+<p id="history-error-msg">Unable to load orders. Please try again.</p>
+<button class="btn btn-primary" id="history-retry">Try Again</button>
+</div>
+
+<div id="history-results" style="display:none">
+<div class="tabs" style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:20px;">
+  <button class="tab-btn active" data-tab="orders" style="flex:1;padding:12px;background:none;border:none;border-bottom:2px solid var(--primary);color:var(--primary);font-family:var(--font);font-size:15px;font-weight:600;cursor:pointer;">Orders</button>
+  <button class="tab-btn" data-tab="returns" style="flex:1;padding:12px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-muted);font-family:var(--font);font-size:15px;font-weight:500;cursor:pointer;">Returns</button>
+</div>
+<div id="tab-orders">
+  <p style="color:var(--text-muted);margin-bottom:16px;font-size:14px" id="result-count"></p>
+  <div class="order-history-list" id="order-list"></div>
+</div>
+<div id="tab-returns" style="display:none">
+  <p style="color:var(--text-muted);margin-bottom:16px;font-size:14px" id="return-count"></p>
+  <div class="order-history-list" id="return-list"></div>
+</div>
+</div>
+</div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+    requireAuth();
+
+    var spinnerEl = document.getElementById('history-spinner');
+    var emptyEl = document.getElementById('history-empty');
+    var errorEl = document.getElementById('history-error');
+    var errorMsg = document.getElementById('history-error-msg');
+    var resultsEl = document.getElementById('history-results');
+    var orderListEl = document.getElementById('order-list');
+    var resultCount = document.getElementById('result-count');
+    var returnListEl = document.getElementById('return-list');
+    var returnCount = document.getElementById('return-count');
+    var customerEmail = localStorage.getItem('customer_email') || '';
+
+    // load orders + returns via auth
+    function loadOrders() {
+        spinnerEl.style.display = 'flex';
+        resultsEl.style.display = 'none';
+        emptyEl.style.display = 'none';
+        errorEl.style.display = 'none';
+
+        apiAuthPost('customer/orders.php', {})
+            .then(function (data) {
+                var orders = data.data || [];
+                if (orders.length === 0) {
+                    spinnerEl.style.display = 'none';
+                    emptyEl.style.display = 'block';
+                    return;
+                }
+                renderOrders(orders);
+                spinnerEl.style.display = 'none';
+            })
+            .catch(function (err) {
+                spinnerEl.style.display = 'none';
+                errorMsg.textContent = err.message || 'Unable to load orders.';
+                errorEl.style.display = 'block';
+            });
+
+        // Also load returns
+        apiAuthPost('customer/returns.php', {})
+            .then(function (data) {
+                renderReturns(data.data || []);
+            })
+            .catch(function (err) {
+                console.error('Failed to load returns:', err);
+            });
+    }
+
+    // tab switching
+    document.querySelectorAll('.tab-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var tab = this.dataset.tab;
+            document.querySelectorAll('.tab-btn').forEach(function (b) {
+                b.classList.remove('active');
+                b.style.borderBottomColor = 'transparent';
+                b.style.color = 'var(--text-muted)';
+            });
+            this.classList.add('active');
+            this.style.borderBottomColor = 'var(--primary)';
+            this.style.color = 'var(--primary)';
+            document.getElementById('tab-orders').style.display = tab === 'orders' ? 'block' : 'none';
+            document.getElementById('tab-returns').style.display = tab === 'returns' ? 'block' : 'none';
+        });
+    });
+
+    // show order list
+    function renderOrders(orders) {
+        resultCount.textContent = orders.length + ' order' + (orders.length > 1 ? 's' : '') + ' found';
+        var html = '';
+        for (var i = 0; i < orders.length; i++) {
+            var o = orders[i];
+            var statusClass = (o.status || 'processing').toLowerCase();
+            var dateStr = formatDate(o.created_at || o.order_date || '');
+            var items = o.items || [];
+            var itemCount = 0;
+            for (var j = 0; j < items.length; j++) {
+                itemCount += items[j].Quantity || items[j].quantity || 1;
+            }
+
+            html += '<div class="order-history-card">' +
+                '<div class="order-history-header">' +
+                '<span class="order-num">' + escapeHtml(o.order_number) + '</span>' +
+                '<span class="order-status status-' + statusClass + '">' + escapeHtml(o.status || 'Processing') + '</span>' +
+                '<span class="order-total">' + formatPrice(o.total) + '</span>' +
+                '</div>' +
+                '<div class="order-history-meta">' +
+                '<span>' + escapeHtml(dateStr) + '</span>' +
+                '<span>' + itemCount + ' item' + (itemCount > 1 ? 's' : '') + '</span>' +
+                '</div>';
+
+            if (items.length > 0) {
+                html += '<div class="order-history-items"><details>' +
+                    '<summary>View Items (' + items.length + ')</summary>' +
+                    '<table><thead><tr><th>Product</th><th>Price</th><th>Qty</th><th>Total</th></tr></thead><tbody>';
+                for (var k = 0; k < items.length; k++) {
+                    var item = items[k];
+                    var itemName = item.ProductName || item.product_name || 'Product';
+                    var itemPrice = item.Price || item.price || 0;
+                    var itemQty = item.Quantity || item.quantity || 1;
+                    var itemTotal = item.LineTotal || item.line_total || (itemPrice * itemQty);
+                    html += '<tr><td>' + escapeHtml(itemName) + '</td><td>' + formatPrice(itemPrice) + '</td><td>' + itemQty + '</td><td>' + formatPrice(itemTotal) + '</td></tr>';
+                }
+                html += '</tbody></table></details></div>';
+            }
+
+            // Action buttons based on status
+            html += '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">';
+            if (o.status === 'Shipped' || o.status === 'Delivered') {
+                html += '<a href="return-request.html?order=' + encodeURIComponent(o.order_number) + '&email=' + encodeURIComponent(customerEmail) + '" class="btn btn-outline btn-sm">Request Return</a>';
+            }
+            if (o.status === 'Delivered') {
+                html += '<a href="feedback.html?order=' + encodeURIComponent(o.order_number) + '&email=' + encodeURIComponent(customerEmail) + '" class="btn btn-outline btn-sm">Submit Feedback</a>';
+            }
+            html += '</div>';
+            html += '</div>';
+        }
+        orderListEl.innerHTML = html;
+        resultsEl.style.display = 'block';
+        resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // show return list
+    function renderReturns(returns) {
+        returnCount.textContent = returns.length + ' return' + (returns.length > 1 ? 's' : '') + ' found';
+        var html = '';
+        if (returns.length === 0) {
+            html = '<div class="empty-state"><div class="empty-icon">&#128722;</div><h3>No Return Requests</h3><p>You haven\'t requested any returns yet.</p></div>';
+        } else {
+            for (var i = 0; i < returns.length; i++) {
+                var r = returns[i];
+                var statusClass = (r.status || 'Requested').toLowerCase().replace(/\s+/g, '-');
+                var dateStr = formatDate(r.requested_at);
+                var items = r.items || [];
+
+                html += '<div class="order-history-card return-card">' +
+                    '<div class="order-history-header">' +
+                    '<span class="order-num">' + escapeHtml(r.return_number) + '</span>' +
+                    '<span class="order-status status-' + statusClass + '">' + escapeHtml(r.status || 'Requested') + '</span>' +
+                    '<span class="order-total">' + formatPrice(r.total_refund) + '</span>' +
+                    '</div>' +
+                    '<div class="order-history-meta">' +
+                    '<span>Requested: ' + escapeHtml(dateStr) + '</span>' +
+                    '<span>' + items.length + ' item' + (items.length > 1 ? 's' : '') + '</span>' +
+                    '<span>Branch: ' + escapeHtml(r.branch_name || '-') + '</span>' +
+                    '</div>';
+
+                if (items.length > 0) {
+                    html += '<div class="order-history-items"><details>' +
+                        '<summary>View Items (' + items.length + ')</summary>' +
+                        '<table><thead><tr><th>Product</th><th>Price</th><th>Qty</th><th>Total</th></tr></thead><tbody>';
+                    for (var k = 0; k < items.length; k++) {
+                        var item = items[k];
+                        var itemName = item.ProductName || item.product_name || 'Product';
+                        var itemPrice = item.UnitPrice || item.unit_price || item.Price || item.price || 0;
+                        var itemQty = item.Quantity || item.quantity || 1;
+                        var itemTotal = item.LineTotal || item.line_total || (itemPrice * itemQty);
+                        html += '<tr><td>' + escapeHtml(itemName) + '</td><td>' + formatPrice(itemPrice) + '</td><td>' + itemQty + '</td><td>' + formatPrice(itemTotal) + '</td></tr>';
+                    }
+                    html += '</tbody></table></details></div>';
+                }
+
+                if (r.reason) {
+                    html += '<div style="margin-top:8px;font-size:13px;color:var(--text-muted);"><strong>Reason:</strong> ' + escapeHtml(r.reason) + '</div>';
+                }
+                if (r.reason_details) {
+                    html += '<div style="margin-top:4px;font-size:13px;color:var(--text-muted);"><strong>Details:</strong> ' + escapeHtml(r.reason_details) + '</div>';
+                }
+                html += '</div>';
+            }
+        }
+        returnListEl.innerHTML = html;
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return '';
+        try {
+            var d = new Date(dateStr);
+            if (isNaN(d.getTime())) return dateStr;
+            var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+        } catch (_) { return dateStr; }
+    }
+
+    document.getElementById('history-retry').addEventListener('click', loadOrders);
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    initAuthUI();
+    getCartToken();
+    updateCartBadge();
+
+    // Auto-load orders on page load
+    loadOrders();
+})();
+</script>
+</body>
+</html>

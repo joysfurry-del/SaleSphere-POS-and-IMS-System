@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Request Return - Salesphere</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+<div class="container header-inner">
+<a href="index.html" class="logo">Salesphere</a>
+<nav>
+<a href="index.html">Home</a>
+<a href="cart.html">Cart <span class="cart-count" id="cart-count">0</span></a>
+<a href="order-history.html">Orders</a>
+</nav>
+<div id="auth-container"></div>
+</div>
+</header>
+
+<main class="container">
+<div class="return-page" id="return-page">
+<h1>Request a Return</h1>
+
+<div class="return-form" id="return-form">
+<div class="form-group" id="field-email">
+<label>Email Address <span class="required">*</span></label>
+<input type="email" id="return-email" placeholder="john@example.com" required>
+<div class="error-text">Please enter a valid email</div>
+</div>
+<div class="form-group" id="field-order">
+<label>Order Number <span class="required">*</span></label>
+<input type="text" id="return-order" placeholder="OO-20260717-00001" required>
+<div class="error-text">Please enter your order number</div>
+</div>
+<button type="button" class="btn btn-primary btn-lg btn-block" id="load-order-btn">Load Order Items</button>
+
+<div id="items-section" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
+<h3 style="font-size:16px;margin-bottom:12px">Select Items to Return</h3>
+<div class="return-items-list" id="return-items"></div>
+
+<div class="form-group" style="margin-top:16px">
+<label>Reason for Return <span class="required">*</span></label>
+<select id="return-reason-type">
+<option value="">Select a reason...</option>
+<option value="Defective">Defective / Damaged</option>
+<option value="Wrong Item">Wrong Item Received</option>
+<option value="Not as Described">Not as Described</option>
+<option value="Size/Fit Issue">Size / Fit Issue</option>
+<option value="Changed Mind">Changed Mind</option>
+<option value="Other">Other</option>
+</select>
+<div class="error-text" id="reason-error" style="display:block;color:var(--danger);font-size:12px;margin-top:4px">Please select a reason</div>
+</div>
+<div class="form-group">
+<label>Additional Details</label>
+<textarea id="return-reason-details" placeholder="Provide more details about the issue..." style="min-height:80px"></textarea>
+</div>
+
+<button type="button" class="btn btn-primary btn-lg btn-block" id="submit-return-btn">Submit Return Request</button>
+</div>
+</div>
+
+<div id="return-spinner" class="page-spinner" style="display:none"><div class="spinner"></div></div>
+
+<div id="return-success" class="return-success" style="display:none">
+<div class="success-icon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" stroke="#fff" stroke-width="3" fill="none"/></polyline></svg></div>
+<h2>Return Request Submitted!</h2>
+<p style="color:var(--text-muted);margin-bottom:8px">Your return request has been received.</p>
+<p style="font-size:14px;color:var(--text-muted)">Return Number:</p>
+<p class="return-number" id="return-number">---</p>
+<p style="color:var(--text-muted);margin-top:20px">We will process your return within 3-5 business days.</p>
+<div class="confirmation-actions" style="margin-top:32px">
+<a href="order-history.html" class="btn btn-primary">Back to Orders</a>
+<a href="index.html" class="btn btn-outline">Continue Shopping</a>
+</div>
+</div>
+
+<div id="return-error" class="lookup-error" style="display:none">
+<h3>Error</h3>
+<p id="return-error-msg">Something went wrong. Please try again.</p>
+<button class="btn btn-primary" id="return-error-retry">Try Again</button>
+</div>
+</div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+(function () {
+    var params = new URLSearchParams(window.location.search);
+    var prefilledOrder = params.get('order') || '';
+    var prefilledEmail = params.get('email') || localStorage.getItem('customer_email') || '';
+
+    var emailInput = document.getElementById('return-email');
+    var orderInput = document.getElementById('return-order');
+    var loadBtn = document.getElementById('load-order-btn');
+    var itemsSection = document.getElementById('items-section');
+    var itemsList = document.getElementById('return-items');
+    var reasonTypeEl = document.getElementById('return-reason-type');
+    var reasonDetailsEl = document.getElementById('return-reason-details');
+    var reasonError = document.getElementById('reason-error');
+    var submitBtn = document.getElementById('submit-return-btn');
+    var spinnerEl = document.getElementById('return-spinner');
+    var formEl = document.getElementById('return-form');
+    var successEl = document.getElementById('return-success');
+    var returnNumberEl = document.getElementById('return-number');
+    var errorEl = document.getElementById('return-error');
+    var errorMsg = document.getElementById('return-error-msg');
+
+    if (prefilledOrder) orderInput.value = prefilledOrder;
+    if (prefilledEmail) emailInput.value = prefilledEmail;
+
+    var loadedItems = [];
+    var loadedOrderNum = '';
+
+    // load order items for return
+    loadBtn.addEventListener('click', function () {
+        var email = emailInput.value.trim();
+        var order = orderInput.value.trim();
+        var valid = true;
+
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            document.getElementById('field-email').classList.add('has-error');
+            valid = false;
+        } else {
+            document.getElementById('field-email').classList.remove('has-error');
+        }
+        if (!order) {
+            document.getElementById('field-order').classList.add('has-error');
+            valid = false;
+        } else {
+            document.getElementById('field-order').classList.remove('has-error');
+        }
+        if (!valid) return;
+
+        itemsSection.style.display = 'none';
+        errorEl.style.display = 'none';
+        loadBtn.disabled = true;
+        loadBtn.textContent = 'Loading...';
+        spinnerEl.style.display = 'flex';
+
+        var fetchFn = getAuthToken() ? apiAuthPost : apiPost;
+        fetchFn('orders.php', { email: email, order_number: order })
+            .then(function (data) {
+                spinnerEl.style.display = 'none';
+                loadBtn.disabled = false;
+                loadBtn.textContent = 'Load Order Items';
+
+                var orderData = data.data || {};
+                loadedItems = orderData.items || [];
+                loadedOrderNum = order;
+
+                if (loadedItems.length === 0) {
+                    showToast('No items found in this order', 'warning');
+                    return;
+                }
+
+                renderItems(loadedItems);
+                itemsSection.style.display = 'block';
+                reasonError.style.display = 'none';
+                itemsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            })
+            .catch(function (err) {
+                spinnerEl.style.display = 'none';
+                loadBtn.disabled = false;
+                loadBtn.textContent = 'Load Order Items';
+                errorMsg.textContent = err.message || 'Order not found. Please check your details.';
+                errorEl.style.display = 'block';
+            });
+    });
+
+    // show items with checkboxes
+    function renderItems(items) {
+        var html = '';
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var name = item.ProductName || item.product_name || 'Product';
+            var price = item.Price || item.price || 0;
+            var qty = item.Quantity || item.quantity || 1;
+            html += '<div class="return-item">' +
+                '<input type="checkbox" id="ret-item-' + i + '" data-index="' + i + '">' +
+                '<label for="ret-item-' + i + '">' +
+                '<span class="item-name">' + escapeHtml(name) + '</span>' +
+                '<span class="item-detail">' + formatPrice(price) + ' &times; ' + qty + '</span>' +
+                '</label>' +
+                '</div>';
+        }
+        itemsList.innerHTML = html;
+
+        itemsList.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+            cb.addEventListener('change', function () {
+                var row = this.closest('.return-item');
+                if (this.checked) {
+                    row.classList.add('return-item-checked');
+                } else {
+                    row.classList.remove('return-item-checked');
+                }
+            });
+        });
+    }
+
+    // submit return request
+    submitBtn.addEventListener('click', function () {
+        var checkboxes = itemsList.querySelectorAll('input[type="checkbox"]:checked');
+        if (checkboxes.length === 0) {
+            showToast('Please select at least one item to return', 'warning');
+            return;
+        }
+
+        var reasonType = reasonTypeEl.value;
+        var reasonDetails = reasonDetailsEl.value.trim();
+        if (!reasonType) {
+            reasonError.style.display = 'block';
+            reasonTypeEl.focus();
+            return;
+        }
+        reasonError.style.display = 'none';
+
+        var selectedItems = [];
+        checkboxes.forEach(function (cb) {
+            var idx = parseInt(cb.getAttribute('data-index'));
+            var item = loadedItems[idx];
+            if (item) {
+                selectedItems.push({
+                    product_id: item.ProductID || item.product_id || 0,
+                    qty: item.Quantity || item.quantity || 1
+                });
+            }
+        });
+
+        var email = emailInput.value.trim();
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting...';
+        spinnerEl.style.display = 'flex';
+
+        var submitFn = getAuthToken() ? apiAuthPost : apiPost;
+        submitFn('returns.php', {
+            email: email,
+            order_number: loadedOrderNum,
+            reason: reasonType,
+            reason_details: reasonDetails,
+            items: selectedItems
+        })
+            .then(function (data) {
+                spinnerEl.style.display = 'none';
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Return Request';
+                formEl.style.display = 'none';
+                var retData = data.data || {};
+                if (retData.return_number) {
+                    returnNumberEl.textContent = retData.return_number;
+                } else {
+                    returnNumberEl.textContent = 'RMA-' + Date.now();
+                }
+                successEl.style.display = 'block';
+                successEl.scrollIntoView({ behavior: 'smooth' });
+            })
+            .catch(function (err) {
+                spinnerEl.style.display = 'none';
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Return Request';
+                errorMsg.textContent = err.message || 'Failed to submit return request.';
+                errorEl.style.display = 'block';
+            });
+    });
+
+    emailInput.addEventListener('blur', function () {
+        if (this.value.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.value.trim())) {
+            document.getElementById('field-email').classList.remove('has-error');
+        }
+    });
+    orderInput.addEventListener('blur', function () {
+        if (this.value.trim()) {
+            document.getElementById('field-order').classList.remove('has-error');
+        }
+    });
+
+    document.getElementById('return-error-retry').addEventListener('click', function () {
+        errorEl.style.display = 'none';
+    });
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    initAuthUI();
+    getCartToken();
+    updateCartBadge();
+})();
+</script>
+</body>
+</html>
